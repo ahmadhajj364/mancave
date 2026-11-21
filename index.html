@@ -1056,7 +1056,8 @@ function coField(id,k,label,type,ac,opt,help){var v=S.form[k]||"",e=S.coErrs&&S.
    (type==="textarea"?'<textarea id="'+id+'" data-f="'+k+'" rows="3"'+mx+(e?' aria-invalid="true"':"")+">"+esc(v)+"</textarea>":
     '<input id="'+id+'" type="'+type+'" data-f="'+k+'" value="'+esc(v)+'" autocomplete="'+ac+'"'+mx+(type==="tel"?' inputmode="tel"':"")+(type==="email"?' inputmode="email"':"")+(e?' aria-invalid="true"':"")+">")+
    (e?'<p class="f-err">'+esc(e)+"</p>":help?'<p class="help">'+esc(help)+"</p>":"")+"</div>";}
-function phoneDigits(v){return String(v||"").replace(/\D/g,"");}
+function enDigits(v){return String(v||"").replace(/[\u0660-\u0669]/g,function(d){return d.charCodeAt(0)-1632;}).replace(/[\u06F0-\u06F9]/g,function(d){return d.charCodeAt(0)-1776;});}
+function phoneDigits(v){return enDigits(v).replace(/\D/g,"");}
 function validateCo(){var f=S.form,e={};
   if(!String(f.name||"").trim())e.name=T("req_field");
   var d=phoneDigits(f.phone);if(!d)e.phone=T("req_field");else if(d.length<7||d.length>15)e.phone=T("bad_phone");
@@ -1078,7 +1079,7 @@ function renderCheckout(){
    '<section class="co-sec"><h2><span class="co-n">1</span>'+esc(T("sec_contact"))+"</h2>"+coField("co-name","name",T("f_name"),"text","name")+''+coField("co-phone","phone",T("f_phone"),"tel","tel")+"</section>"+
    '<section class="co-sec"><h2><span class="co-n">2</span>'+esc(T("sec_delivery"))+"</h2>"+coField("co-area","area",T("f_area"),"text","address-level2")+coField("co-address","address",T("f_address"),"text","street-address")+coField("co-notes","notes",T("f_notes").replace(/\s*\(.*?\)\s*$/,""),"textarea","off",true)+"</section>"+
    '<section class="co-sec"><h2><span class="co-n">3</span>'+esc(T("sec_pay"))+'</h2><div class="pay-opt" role="radio" aria-checked="true"><span class="dot"></span><div><b>'+esc(T("perk2"))+"</b><span>"+esc(T("cod_d"))+"</span></div></div></section>"+
-   '<input class="hp" type="text" id="co-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">'+
+   '<input class="hp" type="text" id="co-hpx" name="mc_hpx_7" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore aria-hidden="true">'+
    (S.coMsg?'<div class="co-alert" role="alert">'+esc(S.coMsg)+(S.coWa?'<button type="button" class="btn-wa" style="width:100%;margin-top:10px" data-a="wa-instead">'+ico("chat")+esc(T("wa_instead"))+"</button>":"")+"</div>":"")+
    ('<button class="btn-f place" type="submit" id="placebtn"'+(S.placing?' disabled aria-busy="true"':"")+">"+esc(S.placing?T("placing"):T("place")+(t.total&&!t.req?" · "+money(t.total):""))+"</button>")+
    '<p class="muted" style="font-size:13px;text-align:center">'+esc(waNum()?T("wa_next"):T("agree"))+"</p></form>"+coSummary()+"</div></div>";
@@ -1088,28 +1089,34 @@ function placeOrder(){
   if(!validateCo()){S.coMsg=T("co_fix");renderCheckout();var first=document.querySelector('[aria-invalid="true"]');if(first)first.focus();return;}
   S.coMsg="";S.coWa=false;
   if(!ordUrl()){goWa(waLink(orderText()));return;}
-  var t=totals(),f=S.form,hp=($("co-website")||{}).value||"";
+  var t=totals(),f=S.form,hp=($("co-hpx")||{}).value||"";
   var items=S.cart.map(function(l){var p=prodById(l.id);if(!p)return null;var c=colorsOf(p);return{id:p.id,name:p.name_en||p.name_ar,name_ar:p.name_ar||"",size:l.size||"",color:(l.ci>-1&&list(p.colors_en)[l.ci])||"",qty:l.qty,price:priced(p)?Number(p.price):null};}).filter(Boolean);
-  var payload={lang:S.lang,name:f.name.trim(),phone:f.phone.trim(),email:String(f.email||"").trim(),area:f.area.trim(),address:f.address.trim(),notes:String(f.notes||"").trim(),items:items,subtotal:t.sub,delivery:t.tbc?null:t.del,total:t.total,currency:DATA.settings.currency||"$",payment:"cod",website:hp,page:location.href.split("#")[0]};
-  S.placing=true;renderCheckout();
+  var payload={lang:S.lang,name:f.name.trim(),phone:enDigits(f.phone).trim(),email:String(f.email||"").trim(),area:f.area.trim(),address:f.address.trim(),notes:String(f.notes||"").trim(),items:items,subtotal:t.sub,delivery:t.tbc?null:t.del,total:t.total,currency:DATA.settings.currency||"$",payment:"cod",website:hp,page:location.href.split("#")[0]};
+  S.placing=true;S.pend={p:payload,sent:0};renderCheckout();
   var hard={missing_fields:1,bad_phone:1,empty_cart:1,bad_item:1,bad_email:1};
-  var fail=function(){S.placing=false;S.coWa=!!waNum();var ph=DATA.settings.phone||"";S.coMsg=T("co_fail")+(ph?" "+T("co_fail2",{p:ph}):"");renderCheckout();var a=document.querySelector(".co-alert");if(a)a.scrollIntoView({block:"center"});};
+  var fail=function(){S.placing=false;S.coWa=!!waNum();lastSave();var ph=DATA.settings.phone||"";S.coMsg=T("co_fail")+(ph?" "+T("co_fail2",{p:ph}):"");renderCheckout();var a=document.querySelector(".co-alert");if(a)a.scrollIntoView({block:"center"});};
   var send=function(n){
     var ctl=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ctl)ctl.abort();},25000);
     fetch(ordUrl(),{method:"POST",body:JSON.stringify(payload),signal:ctl?ctl.signal:undefined}).then(function(r){return r.json();}).then(function(j){
       clearTimeout(tm);if(!j||!j.ok){var e=new Error(j&&j.error||"failed");e.hard=!!(j&&hard[j.error]);throw e;}
       S.lastOrder={id:j.id,name:payload.name,phone:payload.phone,email:payload.email,items:payload.items,total:payload.total,req:t.req,tbc:t.tbc,del:t.del,sub:t.sub,wa:waNum()?waLink(orderText(j.id)):""};
       px("Purchase",{content_ids:payload.items.map(function(x){return x.id;}),contents:payload.items.map(function(x){return{id:x.id,quantity:x.qty};}),num_items:payload.items.reduce(function(a,x){return a+x.qty;},0),content_type:"product",value:payload.total,currency:pxCur()},{eventID:String(j.id)});
-      ssSet("mc_last",S.lastOrder);S.cart=[];saveCart();S.placing=false;S.coErrs={};
+      S.pend=null;ssSet("mc_last",S.lastOrder);S.cart=[];saveCart();S.placing=false;S.coErrs={};
       S.page="done";renderMain();window.scrollTo({top:0});pushSt(true);
       if(S.lastOrder.wa&&isTouch()){var once=S.lastOrder;setTimeout(function(){if(S.page==="done"&&!once.waGone){once.waGone=true;ssSet("mc_last",once);location.href=once.wa;}},1200);}
     }).catch(function(e){clearTimeout(tm);
       /* busy or bad connection: try again quietly (the order system ignores repeats from the same phone) */
-      if(!e.hard&&n<4&&S.page==="checkout"){setTimeout(function(){send(n+1);},[1500,4000,8000][n-1]+Math.random()*[1000,2000,3000][n-1]);return;}
+      if(!e.hard&&n<6&&S.page==="checkout"){setTimeout(function(){send(n+1);},[1500,4000,8000,12000,15000][n-1]+Math.random()*[1000,2000,3000,3000,3000][n-1]);return;}
       fail();});
   };
   send(1);
 }
+/* the normal send failed: hand the order to the browser to deliver even if the customer leaves for WhatsApp.
+   The order system ignores a repeat from the same phone within a minute, so this never doubles a saved order. */
+function lastSave(){var q=S.pend;if(!q||q.sent>=2)return;q.sent++;var p=JSON.parse(JSON.stringify(q.p));
+  p.notes=("[Sent after a connection problem - the customer also sent it on WhatsApp] "+(p.notes||"")).trim();
+  var b=JSON.stringify(p),ok=false;try{ok=!!(navigator.sendBeacon&&navigator.sendBeacon(ordUrl(),new Blob([b],{type:"text/plain"})));}catch(e){}
+  if(!ok)try{fetch(ordUrl(),{method:"POST",body:b,keepalive:true,mode:"no-cors"});}catch(e){}}
 function renderDone(){
   var o=S.lastOrder||ssGet("mc_last");var m=$("main");
   if(!o){S.page="home";renderMain();return;}
@@ -1689,7 +1696,7 @@ document.addEventListener("click",function(e){
   case "st-apply":S.stFrom=($("st-from")||{}).value||"";S.stTo=($("st-to")||{}).value||"";renderAdminBody();break;
   case "pop-close":closeOrdPop();break;
   case "pop-view":closeOrdPop();if(!S.admin)openAdmin("orders");S.atab="orders";S.ordFilter="open";S.ordQ="";renderAdminTop();renderAdminBody();var ad=$("adm");if(ad)ad.scrollTop=0;break;
-  case "wa-instead":goWa(waLink(orderText()));break;
+  case "wa-instead":lastSave();goWa(waLink(orderText()));break;
   case "pin-set":(function(){var a=($("pin1")||{}).value||"",b2=($("pin2")||{}).value||"";
     if(!/^[0-9]{4}$/.test(a)){toast("The PIN must be exactly 4 digits.");return;}if(a!==b2){toast("The two PINs don't match.");return;}
     var salt=Math.random().toString(36).slice(2,10);pinHash(a,salt).then(function(h){DATA.settings.admin_pin=salt+"$"+h;ssSet("mc_unlocked",DATA.settings.admin_pin);markDirty();renderAdminTop();renderAdminBody();toast("PIN set. Tap Publish to website to turn it on.");}).catch(function(){toast("This browser can't set a PIN. Open the dashboard with https.");});})();break;
